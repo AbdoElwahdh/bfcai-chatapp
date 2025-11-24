@@ -138,4 +138,3 @@ git push origin feature/your-feature
 ## License
 
 This project is created for educational purposes within the Faculty of Computers and Artificial Intelligence, Beni Suef University.
-قولي وأنا أعملها لك فوراً
