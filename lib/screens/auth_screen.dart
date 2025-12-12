@@ -33,15 +33,12 @@ class _AuthScreenState extends State<AuthScreen> {
 
     try {
       if (_isLogin) {
-        // 1. محاولة تسجيل الدخول
         await _authService.signInWithEmail(_userEmail, _userPassword);
       } else {
-        // 2. محاولة إنشاء حساب
         try {
           await _authService.signUpWithEmail(
               _userEmail, _userPassword, _userName);
         } catch (e) {
-          // الذكاء هنا: لو الإيميل موجود بالفعل، حاول تعمل تسجيل دخول بدلاً من الخطأ
           if (e.toString().contains('email-already-in-use')) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
@@ -50,19 +47,17 @@ class _AuthScreenState extends State<AuthScreen> {
             );
             await _authService.signInWithEmail(_userEmail, _userPassword);
           } else {
-            rethrow; // لو خطأ تاني، اظهره
+            rethrow;
           }
         }
       }
 
-      // 3. الإنتقال الفوري بعد النجاح (بدون انتظار الـ Restart)
       if (mounted) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (context) => const ChatListScreen()),
         );
       }
     } catch (error) {
-      // التعامل مع الأخطاء
       if (mounted) {
         String msg = "Authentication failed";
         if (error.toString().contains('user-not-found'))
