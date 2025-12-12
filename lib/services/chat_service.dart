@@ -12,6 +12,13 @@ class ChatService {
     return ids.join("_");
   }
 
+  /// Fetch user data by ID (needed for ChatList -> ChatScreen navigation).
+  Future<Map<String, dynamic>?> getUserData(String userId) async {
+    final doc = await _firestore.collection('users').doc(userId).get();
+    if (!doc.exists) return null;
+    return doc.data() as Map<String, dynamic>;
+  }
+
   /// Safely fetch current user document.
   Future<Map<String, dynamic>?> getCurrentUserData() async {
     final user = _auth.currentUser;
@@ -47,10 +54,8 @@ class ChatService {
         .collection("messages");
 
     final batch = _firestore.batch();
-
     final newMessageRef = messagesRef.doc();
 
-    // Message object
     batch.set(newMessageRef, {
       "id": newMessageRef.id,
       "senderId": senderId,
@@ -61,7 +66,6 @@ class ChatService {
       "read": false,
     });
 
-    // Room meta update
     final roomRef = _firestore.collection("chat_rooms").doc(chatRoomId);
     batch.set(
       roomRef,

@@ -33,17 +33,29 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
-  void sendMessage() async {
+  Future<void> sendMessage() async {
     if (_msgController.text.trim().isEmpty) return;
-    String msg = _msgController.text;
+
+    final msg = _msgController.text.trim();
     _msgController.clear();
 
-    await _chatService.sendMessage(
-      widget.receiverId,
-      msg,
-      {'username': widget.receiverName, 'email': widget.receiverEmail},
-    );
-    _scrollToBottom();
+    final receiverData = {
+      "username": widget.receiverName,
+      "email": widget.receiverEmail,
+    };
+
+    try {
+      await _chatService.sendMessage(
+        widget.receiverId,
+        msg,
+        receiverData,
+      );
+      _scrollToBottom();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Failed to send message.")),
+      );
+    }
   }
 
   void _scrollToBottom() {
@@ -58,6 +70,17 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final currentUser = _authService.currentUser;
+
+    // extra safety
+    if (currentUser == null) {
+      return const Scaffold(
+        body: Center(
+          child: Text("No user signed in."),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.white,
@@ -78,13 +101,10 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(widget.receiverName,
-                      style: const TextStyle(
-                          fontSize: 16, overflow: TextOverflow.ellipsis)),
-                ],
+              child: Text(
+                widget.receiverName,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 16),
               ),
             ),
           ],
@@ -93,16 +113,34 @@ class _ChatScreenState extends State<ChatScreen> {
       body: Column(
         children: [
           Expanded(
-            child: StreamBuilder(
+            child: StreamBuilder<QuerySnapshot>(
               stream: _chatService.getMessages(
-                  _authService.currentUser!.uid, widget.receiverId),
+                currentUser.uid,
+                widget.receiverId,
+              ),
               builder: (context, snapshot) {
-                if (snapshot.hasError)
-                  return const Center(child: Text("Error"));
-                if (snapshot.connectionState == ConnectionState.waiting)
-                  return const Center(child: CircularProgressIndicator());
+                // loading
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(
+                    child: CircularProgressIndicator(),
+                  );
+                }
 
-                var docs = snapshot.data!.docs;
+                // error
+                if (snapshot.hasError) {
+                  return const Center(
+                    child: Text("Error loading messages."),
+                  );
+                }
+
+                // empty
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                  return const Center(
+                    child: Text("No messages yet."),
+                  );
+                }
+
+                final docs = snapshot.data!.docs;
 
                 return ListView.builder(
                   reverse: true,
@@ -110,7 +148,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   padding: const EdgeInsets.all(16),
                   itemCount: docs.length,
                   itemBuilder: (context, index) =>
-                      _buildMessageBubble(docs[index]),
+                      _buildMessageBubble(docs[index], currentUser.uid),
                 );
               },
             ),
@@ -121,9 +159,9 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _buildMessageBubble(DocumentSnapshot doc) {
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-    bool isMe = data['senderId'] == _authService.currentUser!.uid;
+  Widget _buildMessageBubble(DocumentSnapshot doc, String myId) {
+    final data = doc.data() as Map<String, dynamic>;
+    final bool isMe = data['senderId'] == myId;
 
     Timestamp? timestamp = data['timestamp'];
     String timeText = "";
@@ -150,9 +188,10 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           boxShadow: [
             BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                offset: const Offset(0, 1),
-                blurRadius: 3),
+              color: Colors.black.withOpacity(0.05),
+              offset: const Offset(0, 1),
+              blurRadius: 3,
+            ),
           ],
         ),
         child: Column(
@@ -160,16 +199,19 @@ class _ChatScreenState extends State<ChatScreen> {
               isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
             Text(
-              data['text'],
+              data['text'] ?? "",
               style: TextStyle(
-                  color: isMe ? Colors.white : Colors.black87, fontSize: 15),
+                color: isMe ? Colors.white : Colors.black87,
+                fontSize: 15,
+              ),
             ),
             const SizedBox(height: 4),
             Text(
               timeText,
               style: TextStyle(
-                  color: isMe ? Colors.white70 : Colors.grey[500],
-                  fontSize: 10),
+                color: isMe ? Colors.white70 : Colors.grey[500],
+                fontSize: 10,
+              ),
             ),
           ],
         ),
@@ -184,9 +226,10 @@ class _ChatScreenState extends State<ChatScreen> {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              offset: const Offset(0, -2),
-              blurRadius: 5),
+            color: Colors.black.withOpacity(0.05),
+            offset: const Offset(0, -2),
+            blurRadius: 5,
+          ),
         ],
       ),
       child: SafeArea(
@@ -207,7 +250,9 @@ class _ChatScreenState extends State<ChatScreen> {
             const SizedBox(width: 8),
             Container(
               decoration: const BoxDecoration(
-                  color: Color(0xFF4F46E5), shape: BoxShape.circle),
+                color: Color(0xFF4F46E5),
+                shape: BoxShape.circle,
+              ),
               child: IconButton(
                 icon: const Icon(Icons.send_rounded,
                     color: Colors.white, size: 20),

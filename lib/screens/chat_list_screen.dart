@@ -1,10 +1,8 @@
-import 'package:chat_app/screens/auth_screen.dart';
-import 'package:chat_app/screens/chat_screen.dart';
-import 'package:chat_app/services/auth_service.dart';
-import 'package:chat_app/services/chat_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
+import '../services/chat_service.dart';
+import 'chat_screen.dart';
 
 class ChatListScreen extends StatefulWidget {
   const ChatListScreen({super.key});
@@ -14,195 +12,103 @@ class ChatListScreen extends StatefulWidget {
 }
 
 class _ChatListScreenState extends State<ChatListScreen> {
-  final AuthService _authService = AuthService();
   final ChatService _chatService = ChatService();
-  final TextEditingController _searchController = TextEditingController();
-  bool _isSearching = false;
-
-  void _logout() async {
-    await _authService.signOut();
-    if (mounted) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (context) => const AuthScreen()),
-        (route) => false,
-      );
-    }
-  }
+  final FirebaseAuth _auth = FirebaseAuth.instance;
 
   @override
   Widget build(BuildContext context) {
+    final currentUser = _auth.currentUser;
+
+    if (currentUser == null) {
+      return const Scaffold(
+        body: Center(
+          child: Text("No user signed in."),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Dardash Chats",
-            style: TextStyle(fontWeight: FontWeight.bold)),
-        elevation: 0,
-        centerTitle: false,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout_rounded),
-            onPressed: _logout,
-            tooltip: "Logout",
-          ),
-        ],
+        title: const Text("Chats"),
       ),
-      body: Column(
-        children: [
-          _buildSearchBar(),
-          Expanded(
-            child: _isSearching ? _buildUserSearchList() : _buildMyChatList(),
-          ),
-        ],
-      ),
-    );
-  }
+      body: StreamBuilder<QuerySnapshot>(
+        stream: _chatService.getUserChatRooms(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(
+              child: CircularProgressIndicator(),
+            );
+          }
 
-  Widget _buildSearchBar() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: TextField(
-        controller: _searchController,
-        onChanged: (val) {
-          setState(() {
-            _isSearching = val.trim().isNotEmpty;
-          });
+          if (snapshot.hasError) {
+            return const Center(
+              child: Text("Something went wrong."),
+            );
+          }
+
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return const Center(
+              child: Text("No chats yet."),
+            );
+          }
+
+          final chatRooms = snapshot.data!.docs;
+
+          return ListView.builder(
+            itemCount: chatRooms.length,
+            itemBuilder: (context, index) {
+              final room = chatRooms[index];
+              final data = room.data() as Map<String, dynamic>;
+
+              final participants = data["participants"] as List<dynamic>;
+              final lastMessage = data["lastMessage"] ?? "";
+              final lastMessageTime = data["lastMessageTime"] as Timestamp?;
+
+              final otherUserId = participants.firstWhere(
+                (id) => id != currentUser.uid,
+                orElse: () => "",
+              );
+
+              return ListTile(
+                title: Text("Chat with: $otherUserId"),
+                subtitle: Text(lastMessage),
+                trailing: lastMessageTime != null
+                    ? Text(
+                        lastMessageTime
+                            .toDate()
+                            .toLocal()
+                            .toString()
+                            .split(".")[0],
+                        style: const TextStyle(fontSize: 12),
+                      )
+                    : null,
+                onTap: () async {
+                  // fetch other user's data
+                  final userData = await _chatService.getUserData(otherUserId);
+
+                  if (userData == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("User data not found.")),
+                    );
+                    return;
+                  }
+
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ChatScreen(
+                        receiverId: otherUserId,
+                        receiverName: userData["username"] ?? "Unknown",
+                        receiverEmail: userData["email"] ?? "",
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          );
         },
-        decoration: InputDecoration(
-          hintText: "Search for users...",
-          prefixIcon: const Icon(Icons.search),
-          filled: true,
-          fillColor: Colors.white,
-          border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(30),
-              borderSide: BorderSide.none),
-        ),
       ),
     );
-  }
-
-  Widget _buildMyChatList() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: _chatService.getUserChatRooms(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError)
-          return const Center(child: Text("Something went wrong."));
-        if (snapshot.connectionState == ConnectionState.waiting)
-          return const Center(child: CircularProgressIndicator());
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
-          return _buildEmptyState("No active chats. Search for a friend!");
-
-        return ListView.separated(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          itemCount: snapshot.data!.docs.length,
-          separatorBuilder: (ctx, i) => const Divider(height: 1, indent: 70),
-          itemBuilder: (context, index) {
-            var roomData =
-                snapshot.data!.docs[index].data() as Map<String, dynamic>;
-            String currentUid = _authService.currentUser!.uid;
-            String otherUid = (roomData['participants'] as List)
-                .firstWhere((id) => id != currentUid);
-
-            Map<String, dynamic>? userInfo = roomData['usersInfo']?[otherUid];
-            String username = userInfo?['username'] ?? 'Unknown User';
-            String email = userInfo?['email'] ?? '';
-            String lastMsg = roomData['lastMessage'] ?? '';
-            Timestamp? time = roomData['lastMessageTime'];
-
-            return ListTile(
-              leading: CircleAvatar(
-                radius: 26,
-                backgroundColor: Theme.of(context).colorScheme.primary,
-                child: Text(
-                  username.isNotEmpty ? username[0].toUpperCase() : '?',
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold),
-                ),
-              ),
-              title: Text(username,
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
-              subtitle:
-                  Text(lastMsg, maxLines: 1, overflow: TextOverflow.ellipsis),
-              trailing: time != null
-                  ? Text(_formatTime(time),
-                      style: TextStyle(color: Colors.grey[500], fontSize: 12))
-                  : null,
-              onTap: () => _openChat(otherUid, username, email),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildUserSearchList() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance.collection('users').snapshots(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData)
-          return const Center(child: CircularProgressIndicator());
-
-        var users = snapshot.data!.docs.where((doc) {
-          var data = doc.data() as Map<String, dynamic>;
-          String username = data['username'].toString().toLowerCase();
-          String email = data['email'].toString().toLowerCase();
-          String query = _searchController.text.toLowerCase();
-          if (doc.id == _authService.currentUser?.uid) return false;
-          return username.contains(query) || email.contains(query);
-        }).toList();
-
-        if (users.isEmpty) return _buildEmptyState("No user found");
-
-        return ListView.builder(
-          itemCount: users.length,
-          itemBuilder: (context, index) {
-            var userData = users[index].data() as Map<String, dynamic>;
-            return ListTile(
-              leading: CircleAvatar(
-                  backgroundColor: Colors.grey[300],
-                  child: const Icon(Icons.person, color: Colors.white)),
-              title: Text(userData['username']),
-              subtitle: Text(userData['email']),
-              trailing:
-                  const Icon(Icons.message_outlined, color: Color(0xFF4F46E5)),
-              onTap: () => _openChat(
-                  users[index].id, userData['username'], userData['email']),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildEmptyState(String text) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.forum_outlined, size: 60, color: Colors.grey[300]),
-          const SizedBox(height: 10),
-          Text(text, style: TextStyle(color: Colors.grey[500])),
-        ],
-      ),
-    );
-  }
-
-  void _openChat(String id, String name, String email) {
-    Navigator.push(
-        context,
-        MaterialPageRoute(
-            builder: (context) => ChatScreen(
-                receiverId: id, receiverName: name, receiverEmail: email)));
-  }
-
-  String _formatTime(Timestamp timestamp) {
-    DateTime date = timestamp.toDate();
-    DateTime now = DateTime.now();
-    if (now.day == date.day &&
-        now.month == date.month &&
-        now.year == date.year) {
-      return DateFormat.jm().format(date);
-    }
-    return DateFormat.yMMMd().format(date);
   }
 }
