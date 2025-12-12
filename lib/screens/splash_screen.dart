@@ -1,9 +1,10 @@
-import 'dart:async';
+// Minimal splash screen that redirects to auth or chat list.
 import 'package:flutter/material.dart';
-import 'package:chat_app/main.dart';
+import 'package:chat_app/services/auth_service.dart';
+import 'auth_screen.dart';
+import 'chat_list_screen.dart';
+import '../utils/app_colors.dart';
 
-/// Simple splash screen that shows the app name and logo,
-/// then navigates to AuthWrapper.
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -12,72 +13,38 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
+  final AuthService _auth = AuthService();
+
   @override
   void initState() {
     super.initState();
+    Future.microtask(_check);
+  }
 
-    // Navigate to AuthWrapper after 2 seconds.
-    Timer(const Duration(seconds: 2), () {
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (context) => const AuthWrapper(),
-          ),
-        );
-      }
-    });
+  Future<void> _check() async {
+    await Future.delayed(const Duration(seconds: 1));
+    final user = _auth.currentUser;
+    if (!mounted) return;
+    if (user == null) {
+      Navigator.pushReplacement(
+          context, MaterialPageRoute(builder: (_) => const AuthScreen()));
+    } else {
+      Navigator.pushReplacement(
+          context, MaterialPageRoute(builder: (_) => const ChatListScreen()));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
     return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              colorScheme.primary,
-              colorScheme.primaryContainer,
-            ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: const Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircleAvatar(
-                radius: 40,
-                backgroundColor: Colors.white,
-                child: Icon(
-                  Icons.forum_rounded,
-                  size: 40,
-                  color: Color(0xFF4F46E5),
-                ),
-              ),
-              SizedBox(height: 18),
-              Text(
-                'Dardash',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.2,
-                ),
-              ),
-              SizedBox(height: 8),
-              Text(
-                'Simple • Fast • Secure chat',
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 14,
-                ),
-              ),
-            ],
-          ),
-        ),
+      backgroundColor: AppColors.background,
+      body: Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: const [
+          Icon(Icons.chat_bubble, size: 64, color: AppColors.primary),
+          SizedBox(height: 12),
+          Text('Chat App',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+        ]),
       ),
     );
   }
