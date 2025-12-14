@@ -1,6 +1,3 @@
-// Auth screen: Login & Signup combined screen.
-// Clean UI + Safe null-handling + short English comments only.
-
 import 'package:flutter/material.dart';
 import 'package:chat_app/screens/chat_list_screen.dart';
 import 'package:chat_app/services/auth_service.dart';
@@ -17,43 +14,43 @@ class _AuthScreenState extends State<AuthScreen> {
   final _formKey = GlobalKey<FormState>();
   final AuthService _auth = AuthService();
 
-  bool _isLogin = true; // Toggle login/signup
-  bool _loading = false; // Show loader during auth
+  bool _isLogin = true;
+  bool _loading = false;
 
   String _email = "";
   String _username = "";
   String _password = "";
 
-  // Submit login or signup
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     _formKey.currentState!.save();
 
     setState(() => _loading = true);
 
-    try {
-      if (_isLogin) {
-        await _auth.signInWithEmail(_email, _password);
-      } else {
-        await _auth.signUpWithEmail(_email, _password, _username);
-      }
+    // Get error message from AuthService (null means success)
+    final String? error = _isLogin
+        ? await _auth.signInWithEmail(_email, _password)
+        : await _auth.signUpWithEmail(_email, _password, _username);
 
-      if (!mounted) return;
+    if (!mounted) return;
 
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const ChatListScreen()),
-      );
-    } catch (_) {
+    if (error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Authentication failed")),
+        SnackBar(content: Text(error)),
       );
-    } finally {
-      if (mounted) setState(() => _loading = false);
+      setState(() => _loading = false);
+      return;
     }
+
+    // Success → go to chat list
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => const ChatListScreen()),
+    );
+
+    setState(() => _loading = false);
   }
 
-  // Build a reusable text field
   Widget _buildField({
     required String label,
     required bool isPassword,
@@ -92,13 +89,9 @@ class _AuthScreenState extends State<AuthScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Column(
             children: [
-              // App Icon
               const Icon(Icons.chat_bubble_outline,
                   size: 60, color: AppColors.primary),
-
               const SizedBox(height: 12),
-
-              // Screen title
               Text(
                 _isLogin ? "Welcome Back" : "Create Account",
                 style: const TextStyle(
@@ -106,10 +99,7 @@ class _AuthScreenState extends State<AuthScreen> {
                   fontWeight: FontWeight.bold,
                 ),
               ),
-
               const SizedBox(height: 18),
-
-              // Card container
               Container(
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
@@ -126,7 +116,6 @@ class _AuthScreenState extends State<AuthScreen> {
                   key: _formKey,
                   child: Column(
                     children: [
-                      // Username (signup only)
                       if (!_isLogin)
                         _buildField(
                           label: "Username",
@@ -136,10 +125,7 @@ class _AuthScreenState extends State<AuthScreen> {
                               : null,
                           onSaved: (v) => _username = v ?? "",
                         ),
-
                       if (!_isLogin) const SizedBox(height: 12),
-
-                      // Email
                       _buildField(
                         label: "Email",
                         isPassword: false,
@@ -149,10 +135,7 @@ class _AuthScreenState extends State<AuthScreen> {
                             : null,
                         onSaved: (v) => _email = v ?? "",
                       ),
-
                       const SizedBox(height: 12),
-
-                      // Password
                       _buildField(
                         label: "Password",
                         isPassword: true,
@@ -161,10 +144,7 @@ class _AuthScreenState extends State<AuthScreen> {
                             : null,
                         onSaved: (v) => _password = v ?? "",
                       ),
-
                       const SizedBox(height: 18),
-
-                      // Submit button
                       _loading
                           ? const CircularProgressIndicator()
                           : SizedBox(
@@ -183,10 +163,7 @@ class _AuthScreenState extends State<AuthScreen> {
                                 child: Text(_isLogin ? "Login" : "Sign Up"),
                               ),
                             ),
-
                       const SizedBox(height: 10),
-
-                      // Switch login/signup
                       TextButton(
                         onPressed: () {
                           setState(() => _isLogin = !_isLogin);

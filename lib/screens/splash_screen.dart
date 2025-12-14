@@ -22,7 +22,7 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _check() async {
-    await Future.delayed(const Duration(seconds: 1));
+    await Future.delayed(const Duration(seconds: 2));
     final user = _auth.currentUser;
     if (!mounted) return;
     if (user == null) {
@@ -36,10 +36,10 @@ class _SplashScreenState extends State<SplashScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return const Scaffold(
       backgroundColor: AppColors.background,
       body: Center(
-        child: Column(mainAxisSize: MainAxisSize.min, children: const [
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.chat_bubble, size: 64, color: AppColors.primary),
           SizedBox(height: 12),
           Text('Chat App',
