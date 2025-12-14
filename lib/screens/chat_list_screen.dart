@@ -1,10 +1,9 @@
-import 'package:chat_app/screens/auth_screen.dart';
 import 'package:chat_app/screens/chat_screen.dart';
 import 'package:chat_app/services/auth_service.dart';
 import 'package:chat_app/services/chat_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 class ChatListScreen extends StatefulWidget {
   const ChatListScreen({super.key});
@@ -14,159 +13,161 @@ class ChatListScreen extends StatefulWidget {
 }
 
 class _ChatListScreenState extends State<ChatListScreen> {
-  final AuthService _authService = AuthService();
+  final AuthService _auth = AuthService();
   final ChatService _chatService = ChatService();
-  final TextEditingController _searchController = TextEditingController();
-  bool _isSearching = false;
 
-  void _logout() async {
-    await _authService.signOut();
-    if (mounted) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (context) => const AuthScreen()),
-        (route) => false,
-      );
-    }
+  String searchQuery = "";
+
+  /// Search users by username (case-insensitive)
+  Stream<QuerySnapshot> _searchUsers(String query) {
+    return FirebaseFirestore.instance
+        .collection("users")
+        .where("username", isGreaterThanOrEqualTo: query)
+        .where("username", isLessThanOrEqualTo: "$query\uf8ff")
+        .snapshots();
+  }
+
+  /// Only show chat rooms that include current user
+  Stream<QuerySnapshot> _chatRooms() {
+    return _chatService.getUserChatRooms();
   }
 
   @override
   Widget build(BuildContext context) {
+    final currentUid = FirebaseAuth.instance.currentUser!.uid;
+
     return Scaffold(
+      backgroundColor: const Color(0xFFF3F4F6),
       appBar: AppBar(
-        title: const Text("Dardash Chats",
-            style: TextStyle(fontWeight: FontWeight.bold)),
-        elevation: 0,
-        centerTitle: false,
+        title: const Text(
+          "Chats",
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22),
+        ),
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
+        elevation: 1,
         actions: [
           IconButton(
-            icon: const Icon(Icons.logout_rounded),
-            onPressed: _logout,
-            tooltip: "Logout",
-          ),
+            icon: const Icon(Icons.logout),
+            onPressed: () async {
+              await _auth.signOut();
+              Navigator.pushReplacementNamed(context, "/auth");
+            },
+          )
         ],
       ),
       body: Column(
         children: [
           _buildSearchBar(),
           Expanded(
-            child: _isSearching ? _buildUserSearchList() : _buildMyChatList(),
+            child: searchQuery.isEmpty
+                ? _buildChatRoomsList(currentUid)
+                : _buildSearchResults(currentUid),
           ),
         ],
       ),
     );
   }
 
+  /// Search Bar Widget
   Widget _buildSearchBar() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: TextField(
-        controller: _searchController,
-        onChanged: (val) {
-          setState(() {
-            _isSearching = val.trim().isNotEmpty;
-          });
-        },
-        decoration: InputDecoration(
-          hintText: "Search for users...",
-          prefixIcon: const Icon(Icons.search),
-          filled: true,
-          fillColor: Colors.white,
-          border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(30),
-              borderSide: BorderSide.none),
+      padding: const EdgeInsets.all(14),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: TextField(
+          decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.search, color: Colors.indigo),
+            hintText: "Search by name...",
+            border: InputBorder.none,
+            contentPadding: EdgeInsets.symmetric(vertical: 14),
+          ),
+          onChanged: (val) {
+            setState(() => searchQuery = val.trim().toLowerCase());
+          },
         ),
       ),
     );
   }
 
-  Widget _buildMyChatList() {
+  /// ------------------------------
+  /// CHAT ROOMS LIST (default mode)
+  /// ------------------------------
+  Widget _buildChatRoomsList(String currentUid) {
     return StreamBuilder<QuerySnapshot>(
-      stream: _chatService.getUserChatRooms(),
+      stream: _chatRooms(),
       builder: (context, snapshot) {
-        if (snapshot.hasError)
-          return const Center(child: Text("Something went wrong."));
-        if (snapshot.connectionState == ConnectionState.waiting)
+        if (!snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
-          return _buildEmptyState("No active chats. Search for a friend!");
+        }
 
-        return ListView.separated(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          itemCount: snapshot.data!.docs.length,
-          separatorBuilder: (ctx, i) => const Divider(height: 1, indent: 70),
-          itemBuilder: (context, index) {
-            var roomData =
-                snapshot.data!.docs[index].data() as Map<String, dynamic>;
-            String currentUid = _authService.currentUser!.uid;
-            String otherUid = (roomData['participants'] as List)
-                .firstWhere((id) => id != currentUid);
+        final rooms = snapshot.data!.docs;
 
-            Map<String, dynamic>? userInfo = roomData['usersInfo']?[otherUid];
-            String username = userInfo?['username'] ?? 'Unknown User';
-            String email = userInfo?['email'] ?? '';
-            String lastMsg = roomData['lastMessage'] ?? '';
-            Timestamp? time = roomData['lastMessageTime'];
-
-            return ListTile(
-              leading: CircleAvatar(
-                radius: 26,
-                backgroundColor: Theme.of(context).colorScheme.primary,
-                child: Text(
-                  username.isNotEmpty ? username[0].toUpperCase() : '?',
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold),
-                ),
-              ),
-              title: Text(username,
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
-              subtitle:
-                  Text(lastMsg, maxLines: 1, overflow: TextOverflow.ellipsis),
-              trailing: time != null
-                  ? Text(_formatTime(time),
-                      style: TextStyle(color: Colors.grey[500], fontSize: 12))
-                  : null,
-              onTap: () => _openChat(otherUid, username, email),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildUserSearchList() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance.collection('users').snapshots(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData)
-          return const Center(child: CircularProgressIndicator());
-
-        var users = snapshot.data!.docs.where((doc) {
-          var data = doc.data() as Map<String, dynamic>;
-          String username = data['username'].toString().toLowerCase();
-          String email = data['email'].toString().toLowerCase();
-          String query = _searchController.text.toLowerCase();
-          if (doc.id == _authService.currentUser?.uid) return false;
-          return username.contains(query) || email.contains(query);
-        }).toList();
-
-        if (users.isEmpty) return _buildEmptyState("No user found");
+        if (rooms.isEmpty) {
+          return const Center(child: Text("No chats yet"));
+        }
 
         return ListView.builder(
-          itemCount: users.length,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          itemCount: rooms.length,
           itemBuilder: (context, index) {
-            var userData = users[index].data() as Map<String, dynamic>;
-            return ListTile(
-              leading: CircleAvatar(
-                  backgroundColor: Colors.grey[300],
-                  child: const Icon(Icons.person, color: Colors.white)),
-              title: Text(userData['username']),
-              subtitle: Text(userData['email']),
-              trailing:
-                  const Icon(Icons.message_outlined, color: Color(0xFF4F46E5)),
-              onTap: () => _openChat(
-                  users[index].id, userData['username'], userData['email']),
+            final room = rooms[index].data() as Map<String, dynamic>;
+            final participants = (room["participants"] ?? []) as List;
+
+            if (participants.isEmpty) return const SizedBox();
+
+            /// Determine the other participant
+            String? otherId;
+            for (var id in participants) {
+              if (id != currentUid) {
+                otherId = id;
+                break;
+              }
+            }
+            if (otherId == null) return const SizedBox();
+
+            return _buildChatRoomTile(room, otherId);
+          },
+        );
+      },
+    );
+  }
+
+  /// Builds each chat room tile
+  Widget _buildChatRoomTile(Map<String, dynamic> room, String otherId) {
+    return FutureBuilder<Map<String, dynamic>?>(
+      future: _chatService.getUserData(otherId),
+      builder: (context, userSnap) {
+        if (!userSnap.hasData) return const SizedBox();
+
+        final user = userSnap.data!;
+        final username = (user["username"] ?? "").toString();
+        final email = user["email"];
+        final lastMsg = (room["lastMessage"] ?? "").toString();
+
+        return _buildTile(
+          username: username,
+          subtitle: lastMsg,
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ChatScreen(
+                  receiverId: otherId,
+                  receiverName: username,
+                  receiverEmail: email,
+                ),
+              ),
             );
           },
         );
@@ -174,35 +175,98 @@ class _ChatListScreenState extends State<ChatListScreen> {
     );
   }
 
-  Widget _buildEmptyState(String text) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.forum_outlined, size: 60, color: Colors.grey[300]),
-          const SizedBox(height: 10),
-          Text(text, style: TextStyle(color: Colors.grey[500])),
-        ],
-      ),
+  /// ------------------------------
+  /// SEARCH RESULTS LIST
+  /// ------------------------------
+  Widget _buildSearchResults(String currentUid) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _searchUsers(searchQuery),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        final users = snapshot.data!.docs.where((u) => u.id != currentUid);
+
+        if (users.isEmpty) {
+          return const Center(child: Text("No users found"));
+        }
+
+        return ListView.builder(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          itemCount: users.length,
+          itemBuilder: (context, index) {
+            final data = users.elementAt(index).data() as Map<String, dynamic>;
+            final uid = users.elementAt(index).id;
+
+            final username = (data["username"] ?? "").toString();
+
+            return _buildTile(
+              username: username,
+              subtitle: "", // hide email in search results
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ChatScreen(
+                      receiverId: uid,
+                      receiverName: username,
+                      receiverEmail: data["email"],
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
     );
   }
 
-  void _openChat(String id, String name, String email) {
-    Navigator.push(
-        context,
-        MaterialPageRoute(
-            builder: (context) => ChatScreen(
-                receiverId: id, receiverName: name, receiverEmail: email)));
-  }
+  /// Reusable UI tile for chat list + search list
+  Widget _buildTile({
+    required String username,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    final avatarLetter = username.isNotEmpty ? username[0].toUpperCase() : "?";
 
-  String _formatTime(Timestamp timestamp) {
-    DateTime date = timestamp.toDate();
-    DateTime now = DateTime.now();
-    if (now.day == date.day &&
-        now.month == date.month &&
-        now.year == date.year) {
-      return DateFormat.jm().format(date);
-    }
-    return DateFormat.yMMMd().format(date);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: ListTile(
+        leading: CircleAvatar(
+          radius: 24,
+          backgroundColor: Colors.indigo,
+          child: Text(
+            avatarLetter,
+            style: const TextStyle(color: Colors.white, fontSize: 18),
+          ),
+        ),
+        title: Text(
+          username,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        subtitle: subtitle.isNotEmpty
+            ? Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.grey),
+              )
+            : null,
+        onTap: onTap,
+      ),
+    );
   }
 }

@@ -1,78 +1,87 @@
+// Input area widget for sending new messages.
 import 'package:flutter/material.dart';
+import '../services/chat_service.dart';
+import '../services/auth_service.dart';
+import '../utils/app_colors.dart';
 
-/// Bottom input area used to type and send new messages.
 class NewMessage extends StatefulWidget {
-  final void Function(String message) onSendMessage;
+  final String receiverId;
+  final String receiverName;
+  final String receiverEmail;
 
-  const NewMessage({super.key, required this.onSendMessage});
+  const NewMessage(
+      {super.key,
+      required this.receiverId,
+      required this.receiverName,
+      required this.receiverEmail});
 
   @override
   State<NewMessage> createState() => _NewMessageState();
 }
 
 class _NewMessageState extends State<NewMessage> {
-  final _controller = TextEditingController();
-  String _enteredMessage = '';
+  final TextEditingController _controller = TextEditingController();
+  final ChatService _chat = ChatService();
+  final AuthService _auth = AuthService();
+  bool _sending = false;
 
-  void _sendMessage() {
-    if (_enteredMessage.trim().isEmpty) return;
+  Future<void> _send() async {
+    final text = _controller.text.trim();
+    if (text.isEmpty) return;
+    setState(() => _sending = true);
 
-    widget.onSendMessage(_enteredMessage.trim());
-    _controller.clear();
-    setState(() => _enteredMessage = '');
+    try {
+      await _chat.sendMessage(widget.receiverId, text, {
+        'username': widget.receiverName,
+        'email': widget.receiverEmail,
+      });
+      _controller.clear();
+    } catch (_) {
+      // ignore: avoid_print
+      print('send failed');
+    } finally {
+      setState(() => _sending = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 8,
-            offset: const Offset(0, -2),
-          ),
-        ],
-      ),
+      color: Colors.white,
       child: Row(
         children: [
           Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF3F4F6),
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: TextField(
-                controller: _controller,
-                onChanged: (value) => setState(() => _enteredMessage = value),
-                textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  hintText: 'Type a message...',
-                  border: InputBorder.none,
-                ),
+            child: TextField(
+              controller: _controller,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                hintText: 'Type a message...',
+                border: OutlineInputBorder(borderSide: BorderSide.none),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                filled: true,
+                fillColor: Color(0xFFF3F4F6),
               ),
             ),
           ),
           const SizedBox(width: 8),
-          CircleAvatar(
-            radius: 24,
-            backgroundColor: const Color(0xFF4F46E5),
+          Container(
+            decoration: const BoxDecoration(
+                shape: BoxShape.circle, color: AppColors.primary),
             child: IconButton(
-              icon: const Icon(Icons.send, color: Colors.white),
-              onPressed: _enteredMessage.trim().isEmpty ? null : _sendMessage,
+              icon: _sending
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          color: Colors.white, strokeWidth: 2))
+                  : const Icon(Icons.send, color: Colors.white),
+              onPressed: _sending ? null : _send,
             ),
           ),
         ],
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
   }
 }

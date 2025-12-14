@@ -1,51 +1,63 @@
+// Message bubble widget used in ChatScreen.
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import '../utils/app_colors.dart';
 
-/// Single chat bubble widget.
 class MessageBubble extends StatelessWidget {
-  final String message;
+  final Map<String, dynamic> msg;
   final bool isMe;
 
-  const MessageBubble({
-    super.key,
-    required this.message,
-    required this.isMe,
-  });
+  const MessageBubble({super.key, required this.msg, required this.isMe});
 
   @override
   Widget build(BuildContext context) {
+    final timestamp = msg['timestamp'] as Timestamp?;
+    final timeText = timestamp != null
+        ? TimeOfDay.fromDateTime(timestamp.toDate()).format(context)
+        : '';
+
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
-        ),
+        margin: const EdgeInsets.symmetric(vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        constraints:
+            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
         decoration: BoxDecoration(
-          color: isMe ? const Color(0xFF4F46E5) : const Color(0xFFE5E7EB),
+          color: isMe ? AppColors.bubbleMe : AppColors.bubbleOther,
           borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(16),
-            topRight: const Radius.circular(16),
+            topLeft: const Radius.circular(18),
+            topRight: const Radius.circular(18),
             bottomLeft:
-                isMe ? const Radius.circular(16) : const Radius.circular(4),
+                isMe ? const Radius.circular(18) : const Radius.circular(6),
             bottomRight:
-                isMe ? const Radius.circular(4) : const Radius.circular(16),
+                isMe ? const Radius.circular(6) : const Radius.circular(18),
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 6,
-              offset: const Offset(0, 3),
-            ),
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 4,
+                offset: const Offset(0, 2))
           ],
         ),
-        child: Text(
-          message,
-          style: TextStyle(
-            color: isMe ? Colors.white : Colors.black87,
-            fontSize: 15,
-            height: 1.3,
-          ),
+        child: Column(
+          crossAxisAlignment:
+              isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          children: [
+            Text(
+              msg['text'] ?? '',
+              style: TextStyle(
+                  color: isMe ? Colors.white : AppColors.textDark,
+                  fontSize: 15),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              timeText,
+              style: TextStyle(
+                  color: isMe ? Colors.white70 : AppColors.textLight,
+                  fontSize: 11),
+            ),
+          ],
         ),
       ),
     );
