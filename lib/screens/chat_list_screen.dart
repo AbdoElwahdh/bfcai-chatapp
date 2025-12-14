@@ -1,9 +1,11 @@
-import 'package:chat_app/screens/chat_screen.dart';
-import 'package:chat_app/services/auth_service.dart';
-import 'package:chat_app/services/chat_service.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+import '../services/chat_service.dart';
+import '../services/auth_service.dart';
+import 'chat_screen.dart';
 
 class ChatListScreen extends StatefulWidget {
   const ChatListScreen({super.key});
@@ -13,207 +15,171 @@ class ChatListScreen extends StatefulWidget {
 }
 
 class _ChatListScreenState extends State<ChatListScreen> {
-  final AuthService _auth = AuthService();
   final ChatService _chatService = ChatService();
+  final AuthService _authService = AuthService();
+  final TextEditingController _searchController = TextEditingController();
 
-  String searchQuery = "";
+  String _searchQuery = '';
+  Timer? _debounce;
 
-  /// Search users by username (case-insensitive)
-  Stream<QuerySnapshot> _searchUsers(String query) {
-    return FirebaseFirestore.instance
-        .collection("users")
-        .where("username", isGreaterThanOrEqualTo: query)
-        .where("username", isLessThanOrEqualTo: "$query\uf8ff")
-        .snapshots();
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _searchController.dispose();
+    super.dispose();
   }
 
-  /// Only show chat rooms that include current user
-  Stream<QuerySnapshot> _chatRooms() {
-    return _chatService.getUserChatRooms();
+  // Search Logic with Debounce
+  void _onSearchChanged(String query) {
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    _debounce = Timer(const Duration(milliseconds: 500), () {
+      if (mounted) {
+        setState(() {
+          _searchQuery =
+              query.trim().toLowerCase(); // Keep this for search to work
+        });
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final currentUid = FirebaseAuth.instance.currentUser!.uid;
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    if (currentUid == null) {
+      return const Scaffold(body: Center(child: Text("Error: No User")));
+    }
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF3F4F6),
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text(
-          "Chats",
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22),
-        ),
+        elevation: 0,
         backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
-        elevation: 1,
+        title: const Text(
+          'Messages',
+          style: TextStyle(
+              color: Colors.black, fontWeight: FontWeight.bold, fontSize: 24),
+        ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.logout),
+            icon: const Icon(Icons.logout, color: Colors.redAccent),
             onPressed: () async {
-              await _auth.signOut();
-              Navigator.pushReplacementNamed(context, "/auth");
+              await _authService.signOut();
+              if (!mounted) return;
+              Navigator.of(context)
+                  .pushNamedAndRemoveUntil('/auth', (route) => false);
             },
-          )
+          ),
         ],
       ),
       body: Column(
         children: [
           _buildSearchBar(),
           Expanded(
-            child: searchQuery.isEmpty
-                ? _buildChatRoomsList(currentUid)
-                : _buildSearchResults(currentUid),
+            child: _searchQuery.isEmpty
+                ? _buildMyChatRooms(currentUid)
+                : _buildGlobalSearch(currentUid),
           ),
         ],
       ),
     );
   }
 
-  /// Search Bar Widget
   Widget _buildSearchBar() {
-    return Padding(
-      padding: const EdgeInsets.all(14),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 6,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: TextField(
-          decoration: const InputDecoration(
-            prefixIcon: Icon(Icons.search, color: Colors.indigo),
-            hintText: "Search by name...",
-            border: InputBorder.none,
-            contentPadding: EdgeInsets.symmetric(vertical: 14),
-          ),
-          onChanged: (val) {
-            setState(() => searchQuery = val.trim().toLowerCase());
-          },
+    return Container(
+      margin: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: TextField(
+        controller: _searchController,
+        onChanged: _onSearchChanged,
+        decoration: InputDecoration(
+          hintText: 'Search for users...',
+          hintStyle: TextStyle(color: Colors.grey[500]),
+          prefixIcon: Icon(Icons.search, color: Colors.grey[500]),
+          suffixIcon: _searchQuery.isNotEmpty
+              ? IconButton(
+                  icon: const Icon(Icons.clear, color: Colors.grey),
+                  onPressed: () {
+                    _searchController.clear();
+                    _onSearchChanged('');
+                  },
+                )
+              : null,
+          border: InputBorder.none,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         ),
       ),
     );
   }
 
-  /// ------------------------------
-  /// CHAT ROOMS LIST (default mode)
-  /// ------------------------------
-  Widget _buildChatRoomsList(String currentUid) {
+  // Tab 1: Recent Chats
+  Widget _buildMyChatRooms(String currentUid) {
     return StreamBuilder<QuerySnapshot>(
-      stream: _chatRooms(),
+      stream: _chatService.getUserChatRooms(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
+        if (snapshot.hasError)
+          return const Center(child: Text("Error loading chats"));
+        if (!snapshot.hasData)
           return const Center(child: CircularProgressIndicator());
-        }
 
         final rooms = snapshot.data!.docs;
-
         if (rooms.isEmpty) {
-          return const Center(child: Text("No chats yet"));
+          return const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.chat_bubble_outline, size: 60, color: Colors.grey),
+                SizedBox(height: 10),
+                Text("No chats yet. Search to start!",
+                    style: TextStyle(color: Colors.grey)),
+              ],
+            ),
+          );
         }
 
-        return ListView.builder(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+        return ListView.separated(
           itemCount: rooms.length,
+          separatorBuilder: (_, __) => const Divider(height: 1, indent: 70),
           itemBuilder: (context, index) {
-            final room = rooms[index].data() as Map<String, dynamic>;
-            final participants = (room["participants"] ?? []) as List;
+            final roomData = rooms[index].data() as Map<String, dynamic>;
+            final participants =
+                List<String>.from(roomData['participants'] ?? []);
+            final otherId = participants.firstWhere((id) => id != currentUid,
+                orElse: () => '');
 
-            if (participants.isEmpty) return const SizedBox();
+            if (otherId.isEmpty) return const SizedBox.shrink();
 
-            /// Determine the other participant
-            String? otherId;
-            for (var id in participants) {
-              if (id != currentUid) {
-                otherId = id;
-                break;
-              }
-            }
-            if (otherId == null) return const SizedBox();
+            return FutureBuilder<Map<String, dynamic>?>(
+              future: _chatService.getUserData(otherId),
+              builder: (context, userSnap) {
+                if (!userSnap.hasData) {
+                  return const ListTile(title: Text("Loading..."));
+                }
+                final user = userSnap.data!;
+                final username = user['username'] ?? 'Unknown';
+                final lastMsg = roomData['lastMessage'] ?? '';
+                final ts = roomData['lastMessageTime'] as Timestamp?;
+                final time = ts != null ? _formatTime(ts) : '';
 
-            return _buildChatRoomTile(room, otherId);
-          },
-        );
-      },
-    );
-  }
-
-  /// Builds each chat room tile
-  Widget _buildChatRoomTile(Map<String, dynamic> room, String otherId) {
-    return FutureBuilder<Map<String, dynamic>?>(
-      future: _chatService.getUserData(otherId),
-      builder: (context, userSnap) {
-        if (!userSnap.hasData) return const SizedBox();
-
-        final user = userSnap.data!;
-        final username = (user["username"] ?? "").toString();
-        final email = user["email"];
-        final lastMsg = (room["lastMessage"] ?? "").toString();
-
-        return _buildTile(
-          username: username,
-          subtitle: lastMsg,
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ChatScreen(
-                  receiverId: otherId,
-                  receiverName: username,
-                  receiverEmail: email,
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  /// ------------------------------
-  /// SEARCH RESULTS LIST
-  /// ------------------------------
-  Widget _buildSearchResults(String currentUid) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: _searchUsers(searchQuery),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        final users = snapshot.data!.docs.where((u) => u.id != currentUid);
-
-        if (users.isEmpty) {
-          return const Center(child: Text("No users found"));
-        }
-
-        return ListView.builder(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          itemCount: users.length,
-          itemBuilder: (context, index) {
-            final data = users.elementAt(index).data() as Map<String, dynamic>;
-            final uid = users.elementAt(index).id;
-
-            final username = (data["username"] ?? "").toString();
-
-            return _buildTile(
-              username: username,
-              subtitle: "", // hide email in search results
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => ChatScreen(
-                      receiverId: uid,
-                      receiverName: username,
-                      receiverEmail: data["email"],
-                    ),
+                return ListTile(
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  leading: CircleAvatar(
+                    radius: 26,
+                    backgroundColor: Colors.indigoAccent,
+                    child: Text(username[0].toUpperCase(),
+                        style: const TextStyle(color: Colors.white)),
                   ),
+                  title: Text(username,
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Text(lastMsg,
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                  trailing: Text(time,
+                      style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                  onTap: () => _navigateToChat(context, otherId, username),
                 );
               },
             );
@@ -223,50 +189,62 @@ class _ChatListScreenState extends State<ChatListScreen> {
     );
   }
 
-  /// Reusable UI tile for chat list + search list
-  Widget _buildTile({
-    required String username,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    final avatarLetter = username.isNotEmpty ? username[0].toUpperCase() : "?";
+  // Tab 2: Global Search (Using username_lowercase)
+  Widget _buildGlobalSearch(String currentUid) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .where('username_lowercase', isGreaterThanOrEqualTo: _searchQuery)
+          .where('username_lowercase',
+              isLessThanOrEqualTo: '$_searchQuery\uf8ff')
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData)
+          return const Center(child: CircularProgressIndicator());
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: ListTile(
-        leading: CircleAvatar(
-          radius: 24,
-          backgroundColor: Colors.indigo,
-          child: Text(
-            avatarLetter,
-            style: const TextStyle(color: Colors.white, fontSize: 18),
-          ),
-        ),
-        title: Text(
-          username,
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        subtitle: subtitle.isNotEmpty
-            ? Text(
-                subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.grey),
-              )
-            : null,
-        onTap: onTap,
-      ),
+        final users =
+            snapshot.data!.docs.where((doc) => doc.id != currentUid).toList();
+
+        if (users.isEmpty) {
+          return Center(child: Text('No user found matching "$_searchQuery"'));
+        }
+
+        return ListView.builder(
+          itemCount: users.length,
+          itemBuilder: (context, index) {
+            final userData = users[index].data() as Map<String, dynamic>;
+            final username = userData['username'] ?? 'Unknown';
+
+            return ListTile(
+              leading: const CircleAvatar(
+                backgroundColor: Colors.green,
+                child: Icon(Icons.person, color: Colors.white),
+              ),
+              title: Text(username),
+              trailing: const Icon(Icons.message, color: Colors.blueAccent),
+              onTap: () => _navigateToChat(context, users[index].id, username),
+            );
+          },
+        );
+      },
     );
+  }
+
+  void _navigateToChat(BuildContext context, String uid, String name) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+          builder: (_) => ChatScreen(receiverId: uid, receiverName: name)),
+    );
+  }
+
+  String _formatTime(Timestamp timestamp) {
+    final now = DateTime.now();
+    final date = timestamp.toDate();
+    if (now.difference(date).inDays == 0) {
+      return "${date.hour}:${date.minute.toString().padLeft(2, '0')}";
+    } else {
+      return "${date.day}/${date.month}";
+    }
   }
 }

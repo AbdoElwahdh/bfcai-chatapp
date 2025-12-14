@@ -1,19 +1,11 @@
-// Input area widget for sending new messages.
 import 'package:flutter/material.dart';
 import '../services/chat_service.dart';
-import '../services/auth_service.dart';
 import '../utils/app_colors.dart';
 
 class NewMessage extends StatefulWidget {
   final String receiverId;
-  final String receiverName;
-  final String receiverEmail;
 
-  const NewMessage(
-      {super.key,
-      required this.receiverId,
-      required this.receiverName,
-      required this.receiverEmail});
+  const NewMessage({super.key, required this.receiverId});
 
   @override
   State<NewMessage> createState() => _NewMessageState();
@@ -21,66 +13,72 @@ class NewMessage extends StatefulWidget {
 
 class _NewMessageState extends State<NewMessage> {
   final TextEditingController _controller = TextEditingController();
-  final ChatService _chat = ChatService();
-  final AuthService _auth = AuthService();
-  bool _sending = false;
+  final ChatService _chatService = ChatService();
+  bool _isSending = false;
 
-  Future<void> _send() async {
+  void _sendMessage() async {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
-    setState(() => _sending = true);
+
+    setState(() => _isSending = true);
 
     try {
-      await _chat.sendMessage(widget.receiverId, text, {
-        'username': widget.receiverName,
-        'email': widget.receiverEmail,
-      });
+      await _chatService.sendMessage(widget.receiverId, text);
       _controller.clear();
-    } catch (_) {
-      // ignore: avoid_print
-      print('send failed');
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to send message: $e')),
+      );
     } finally {
-      setState(() => _sending = false);
+      if (mounted) setState(() => _isSending = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+      padding: const EdgeInsets.only(left: 10, right: 10, bottom: 20, top: 10),
       color: Colors.white,
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _controller,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                hintText: 'Type a message...',
-                border: OutlineInputBorder(borderSide: BorderSide.none),
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                filled: true,
-                fillColor: Color(0xFFF3F4F6),
+      child: SafeArea(
+        child: Row(
+          children: [
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF0F2F5),
+                  borderRadius: BorderRadius.circular(25),
+                ),
+                child: TextField(
+                  controller: _controller,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: const InputDecoration(
+                    hintText: 'Type a message...',
+                    border: InputBorder.none,
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  ),
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 8),
-          Container(
-            decoration: const BoxDecoration(
-                shape: BoxShape.circle, color: AppColors.primary),
-            child: IconButton(
-              icon: _sending
+            const SizedBox(width: 8),
+            CircleAvatar(
+              backgroundColor: AppColors.primary,
+              radius: 22,
+              child: _isSending
                   ? const SizedBox(
-                      width: 20,
                       height: 20,
+                      width: 20,
                       child: CircularProgressIndicator(
-                          color: Colors.white, strokeWidth: 2))
-                  : const Icon(Icons.send, color: Colors.white),
-              onPressed: _sending ? null : _send,
+                          color: Colors.white, strokeWidth: 2),
+                    )
+                  : IconButton(
+                      icon:
+                          const Icon(Icons.send, color: Colors.white, size: 20),
+                      onPressed: _sendMessage,
+                    ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
