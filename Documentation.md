@@ -87,6 +87,42 @@ No group chats, no advanced features — just clean and simple messaging.
 
 ---
 
+### Lib Folder Structure 
+```js
+lib/
+├── main.dart                # Entry point (Initializes Firebase & App)
+│
+├── models/                  # Data classes (Blueprints for data)
+│   ├── user_model.dart      # User data structure (uid, email, name)
+│   ├── chat_model.dart      # Chat metadata (participants, lastMessage)
+│   └── message_model.dart   # Individual message structure
+│
+├── screens/                 # All the pages the user sees
+│   ├── splash_screen.dart   # Checks if user is logged in
+│   │
+│   ├── auth/                # Login & Sign Up Screens
+│   │   ├── login_screen.dart
+│   │   └── signup_screen.dart
+│   │
+│   └── chat/                # Chat functionality screens
+│       ├── chat_list_screen.dart  # Home screen (list of all chats)
+│       └── chat_screen.dart       # The actual conversation screen
+│
+├── services/                # Logic & Firebase Code (No UI here!)
+│   ├── auth_service.dart    # Login, SignUp, Logout logic
+│   └── chat_service.dart    # Send message, Get chats, Delete logic
+│
+├── widgets/                 # Reusable UI Components
+│   ├── custom_button.dart   # Standard app button
+│   ├── custom_textfield.dart# Styled text input
+│   ├── message_bubble.dart  # The blue/grey bubble for messages
+│   └── chat_tile.dart       # Single row in the chat list
+│
+└── utils/                   # Helper functions & Constants
+    ├── constants.dart       # App colors, styles, fixed strings
+    └── helpers.dart         # Functions like 'generateChatId' or date formatting
+```
+
 ### App Flow (Very Simple)
 
 ``` js
