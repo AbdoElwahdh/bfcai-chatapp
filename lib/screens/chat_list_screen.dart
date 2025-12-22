@@ -1,10 +1,12 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-
-import '../services/chat_service.dart';
 import '../services/auth_service.dart';
+import '../services/chat_service.dart';
+import '../models/chat_model.dart';
+import '../models/user_model.dart';
+import 'package:chat_app/Utils/app_colors.dart';
+import '../utils/helpers.dart';
+import '../widgets/empty_state.dart';
+import 'new_chat_screen.dart';
 import 'chat_screen.dart';
 
 class ChatListScreen extends StatefulWidget {
@@ -15,236 +17,230 @@ class ChatListScreen extends StatefulWidget {
 }
 
 class _ChatListScreenState extends State<ChatListScreen> {
-  final ChatService _chatService = ChatService();
   final AuthService _authService = AuthService();
-  final TextEditingController _searchController = TextEditingController();
+  final ChatService _chatService = ChatService();
 
-  String _searchQuery = '';
-  Timer? _debounce;
+  Future<void> _handleLogout() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Logout'),
+        content: const Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text(
+              'Logout',
+              style: TextStyle(color: AppColors.error),
+            ),
+          ),
+        ],
+      ),
+    );
 
-  @override
-  void dispose() {
-    _debounce?.cancel();
-    _searchController.dispose();
-    super.dispose();
+    if (confirm == true) {
+      await _authService.signOut();
+      if (!mounted) return;
+      Navigator.pushReplacementNamed(context, '/login');
+    }
   }
 
-  // Search Logic with Debounce
-  void _onSearchChanged(String query) {
-    if (_debounce?.isActive ?? false) _debounce!.cancel();
-    _debounce = Timer(const Duration(milliseconds: 500), () {
-      if (mounted) {
-        setState(() {
-          _searchQuery =
-              query.trim().toLowerCase(); // Keep this for search to work
-        });
+  Future<void> _handleDeleteChat(String chatId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Chat'),
+        content: const Text('Are you sure you want to delete this chat?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: AppColors.error),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        await _chatService.deleteChat(chatId);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Chat deleted')),
+        );
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to delete chat: $e')),
+        );
       }
-    });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final currentUid = FirebaseAuth.instance.currentUser?.uid;
-    if (currentUid == null) {
-      return const Scaffold(body: Center(child: Text("Error: No User")));
-    }
-
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.background,
       appBar: AppBar(
-        elevation: 0,
         backgroundColor: Colors.white,
+        elevation: 0,
         title: const Text(
-          'Messages',
+          'Chats',
           style: TextStyle(
-              color: Colors.black, fontWeight: FontWeight.bold, fontSize: 24),
+            color: AppColors.textDark,
+            fontWeight: FontWeight.bold,
+            fontSize: 24,
+          ),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.logout, color: Colors.redAccent),
-            onPressed: () async {
-              await _authService.signOut();
-              if (!mounted) return;
-              Navigator.of(context)
-                  .pushNamedAndRemoveUntil('/auth', (route) => false);
-            },
+            icon: const Icon(Icons.logout, color: AppColors.error),
+            onPressed: _handleLogout,
+            tooltip: 'Logout',
           ),
         ],
       ),
-      body: Column(
-        children: [
-          _buildSearchBar(),
-          Expanded(
-            child: _searchQuery.isEmpty
-                ? _buildMyChatRooms(currentUid)
-                : _buildGlobalSearch(currentUid),
-          ),
-        ],
-      ),
-    );
-  }
+      body: StreamBuilder<List<ChatModel>>(
+        stream: _chatService.getChatsStream(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
 
-  Widget _buildSearchBar() {
-    return Container(
-      margin: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: TextField(
-        controller: _searchController,
-        onChanged: _onSearchChanged,
-        decoration: InputDecoration(
-          hintText: 'Search for users...',
-          hintStyle: TextStyle(color: Colors.grey[500]),
-          prefixIcon: Icon(Icons.search, color: Colors.grey[500]),
-          suffixIcon: _searchQuery.isNotEmpty
-              ? IconButton(
-                  icon: const Icon(Icons.clear, color: Colors.grey),
-                  onPressed: () {
-                    _searchController.clear();
-                    _onSearchChanged('');
-                  },
-                )
-              : null,
-          border: InputBorder.none,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        ),
-      ),
-    );
-  }
+          if (snapshot.hasError) {
+            return const Center(
+              child: Text('Error loading chats'),
+            );
+          }
 
-  // Tab 1: Recent Chats
-  Widget _buildMyChatRooms(String currentUid) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: _chatService.getUserChatRooms(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError)
-          return const Center(child: Text("Error loading chats"));
-        if (!snapshot.hasData)
-          return const Center(child: CircularProgressIndicator());
+          final chats = snapshot.data ?? [];
 
-        final rooms = snapshot.data!.docs;
-        if (rooms.isEmpty) {
-          return const Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.chat_bubble_outline, size: 60, color: Colors.grey),
-                SizedBox(height: 10),
-                Text("No chats yet. Search to start!",
-                    style: TextStyle(color: Colors.grey)),
-              ],
+          if (chats.isEmpty) {
+            return const EmptyState(
+              icon: Icons.chat_bubble_outline,
+              message: 'No chats yet\nTap + to start a new chat',
+            );
+          }
+
+          return ListView.separated(
+            itemCount: chats.length,
+            separatorBuilder: (context, index) => const Divider(
+              height: 1,
+              indent: 72,
             ),
+            itemBuilder: (context, index) {
+              final chat = chats[index];
+              final otherUserId =
+                  chat.getOtherUserId(_chatService.currentUserId!);
+
+              return FutureBuilder<UserModel?>(
+                future: _authService.getUserData(otherUserId),
+                builder: (context, userSnapshot) {
+                  if (!userSnapshot.hasData) {
+                    return const ListTile(
+                      leading: CircleAvatar(child: Icon(Icons.person)),
+                      title: Text('Loading...'),
+                    );
+                  }
+
+                  final user = userSnapshot.data!;
+
+                  return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    leading: CircleAvatar(
+                      radius: 28,
+                      backgroundColor: AppColors.primary,
+                      child: Text(
+                        user.username.isNotEmpty
+                            ? user.username[0].toUpperCase()
+                            : '?',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    title: Text(
+                      user.username,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    subtitle: Text(
+                      chat.lastMessage.isEmpty
+                          ? 'No messages yet'
+                          : chat.lastMessage,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.textGrey,
+                        fontSize: 14,
+                      ),
+                    ),
+                    trailing: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          Helpers.formatTime(chat.lastMessageTime),
+                          style: const TextStyle(
+                            color: AppColors.textLight,
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Icon(
+                          Icons.chevron_right,
+                          color: AppColors.textLight,
+                          size: 20,
+                        ),
+                      ],
+                    ),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ChatScreen(
+                            chatId: chat.id,
+                            otherUserId: otherUserId,
+                            otherUsername: user.username,
+                          ),
+                        ),
+                      );
+                    },
+                    onLongPress: () => _handleDeleteChat(chat.id),
+                  );
+                },
+              );
+            },
           );
-        }
-
-        return ListView.separated(
-          itemCount: rooms.length,
-          separatorBuilder: (_, __) => const Divider(height: 1, indent: 70),
-          itemBuilder: (context, index) {
-            final roomData = rooms[index].data() as Map<String, dynamic>;
-            final participants =
-                List<String>.from(roomData['participants'] ?? []);
-            final otherId = participants.firstWhere((id) => id != currentUid,
-                orElse: () => '');
-
-            if (otherId.isEmpty) return const SizedBox.shrink();
-
-            return FutureBuilder<Map<String, dynamic>?>(
-              future: _chatService.getUserData(otherId),
-              builder: (context, userSnap) {
-                if (!userSnap.hasData) {
-                  return const ListTile(title: Text("Loading..."));
-                }
-                final user = userSnap.data!;
-                final username = user['username'] ?? 'Unknown';
-                final lastMsg = roomData['lastMessage'] ?? '';
-                final ts = roomData['lastMessageTime'] as Timestamp?;
-                final time = ts != null ? _formatTime(ts) : '';
-
-                return ListTile(
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  leading: CircleAvatar(
-                    radius: 26,
-                    backgroundColor: Colors.indigoAccent,
-                    child: Text(username[0].toUpperCase(),
-                        style: const TextStyle(color: Colors.white)),
-                  ),
-                  title: Text(username,
-                      style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text(lastMsg,
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
-                  trailing: Text(time,
-                      style: const TextStyle(color: Colors.grey, fontSize: 12)),
-                  onTap: () => _navigateToChat(context, otherId, username),
-                );
-              },
-            );
-          },
-        );
-      },
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const NewChatScreen()),
+          );
+        },
+        backgroundColor: AppColors.primary,
+        child: const Icon(Icons.add, color: Colors.white),
+      ),
     );
-  }
-
-  // Tab 2: Global Search (Using username_lowercase)
-  Widget _buildGlobalSearch(String currentUid) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('users')
-          .where('username_lowercase', isGreaterThanOrEqualTo: _searchQuery)
-          .where('username_lowercase',
-              isLessThanOrEqualTo: '$_searchQuery\uf8ff')
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData)
-          return const Center(child: CircularProgressIndicator());
-
-        final users =
-            snapshot.data!.docs.where((doc) => doc.id != currentUid).toList();
-
-        if (users.isEmpty) {
-          return Center(child: Text('No user found matching "$_searchQuery"'));
-        }
-
-        return ListView.builder(
-          itemCount: users.length,
-          itemBuilder: (context, index) {
-            final userData = users[index].data() as Map<String, dynamic>;
-            final username = userData['username'] ?? 'Unknown';
-
-            return ListTile(
-              leading: const CircleAvatar(
-                backgroundColor: Colors.green,
-                child: Icon(Icons.person, color: Colors.white),
-              ),
-              title: Text(username),
-              trailing: const Icon(Icons.message, color: Colors.blueAccent),
-              onTap: () => _navigateToChat(context, users[index].id, username),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  void _navigateToChat(BuildContext context, String uid, String name) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-          builder: (_) => ChatScreen(receiverId: uid, receiverName: name)),
-    );
-  }
-
-  String _formatTime(Timestamp timestamp) {
-    final now = DateTime.now();
-    final date = timestamp.toDate();
-    if (now.difference(date).inDays == 0) {
-      return "${date.hour}:${date.minute.toString().padLeft(2, '0')}";
-    } else {
-      return "${date.day}/${date.month}";
-    }
   }
 }
