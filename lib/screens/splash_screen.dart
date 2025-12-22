@@ -1,9 +1,6 @@
-// Minimal splash screen that redirects to auth or chat list.
 import 'package:flutter/material.dart';
-import 'package:chat_app/services/auth_service.dart';
-import 'auth_screen.dart';
-import 'chat_list_screen.dart';
-import '../utils/app_colors.dart';
+import '../services/auth_service.dart';
+import 'package:chat_app/Utils/app_colors.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -13,24 +10,29 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
-  final AuthService _auth = AuthService();
+  final AuthService _authService = AuthService();
 
   @override
   void initState() {
     super.initState();
-    Future.microtask(_check);
+    _checkAuth();
   }
 
-  Future<void> _check() async {
+  Future<void> _checkAuth() async {
+    // Wait 2 seconds for splash effect
     await Future.delayed(const Duration(seconds: 2));
-    final user = _auth.currentUser;
+
     if (!mounted) return;
-    if (user == null) {
-      Navigator.pushReplacement(
-          context, MaterialPageRoute(builder: (_) => const AuthScreen()));
+
+    // Check if user is logged in
+    final user = _authService.currentUser;
+
+    if (user != null) {
+      // User is logged in - go to chats
+      Navigator.pushReplacementNamed(context, '/chats');
     } else {
-      Navigator.pushReplacement(
-          context, MaterialPageRoute(builder: (_) => const ChatListScreen()));
+      // User is not logged in - go to login
+      Navigator.pushReplacementNamed(context, '/login');
     }
   }
 
@@ -39,12 +41,25 @@ class _SplashScreenState extends State<SplashScreen> {
     return const Scaffold(
       backgroundColor: AppColors.background,
       body: Center(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.chat_bubble, size: 64, color: AppColors.primary),
-          SizedBox(height: 12),
-          Text('Chat App',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-        ]),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.chat_bubble_rounded,
+              size: 80,
+              color: AppColors.primary,
+            ),
+            SizedBox(height: 20),
+            Text(
+              'Simple Chat',
+              style: TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textDark,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

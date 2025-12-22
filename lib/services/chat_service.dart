@@ -1,111 +1,168 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
+import '../models/chat_model.dart';
+import '../models/message_model.dart';
+import '../utils/helpers.dart';
 
 class ChatService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // Cache to prevent excessive reads
-  final Map<String, Map<String, dynamic>> _userCache = {};
+  // Get current user ID
+  String? get currentUserId => _auth.currentUser?.uid;
 
-  /// Generates a consistent Chat Room ID based on user IDs
-  String getChatRoomId(String id1, String id2) {
-    final ids = [id1, id2]..sort();
-    return ids.join('_');
-  }
+  // Create or get existing chat
+  Future<String?> createChat(String otherUserId) async {
+    if (currentUserId == null) return null;
 
-  /// Get User Data with caching and error handling
-  Future<Map<String, dynamic>?> getUserData(String userId) async {
+    final chatId = Helpers.getChatId(currentUserId!, otherUserId);
+
     try {
-      if (_userCache.containsKey(userId)) {
-        return _userCache[userId];
+      final chatDoc = await _firestore.collection('chats').doc(chatId).get();
+
+      if (!chatDoc.exists) {
+        // Create new chat
+        final chat = ChatModel(
+          id: chatId,
+          participants: [currentUserId!, otherUserId],
+          lastMessage: '',
+          lastMessageTime: Timestamp.now(),
+          createdAt: Timestamp.now(),
+          deletedBy: [],
+        );
+
+        await _firestore.collection('chats').doc(chatId).set(chat.toMap());
+      } else {
+        // Chat exists - restore chat if it was deleted by current user
+        await _firestore.collection('chats').doc(chatId).update({
+          'deletedBy': FieldValue.arrayRemove([currentUserId]),
+        });
       }
 
-      final doc = await _firestore.collection('users').doc(userId).get();
-      if (!doc.exists) return null;
-
-      final data = doc.data() as Map<String, dynamic>;
-      _userCache[userId] = data;
-      return data;
+      return chatId;
     } catch (e) {
-      debugPrint('Error getting user data: $e');
       return null;
     }
   }
 
-  /// Sends a message and updates the ChatRoom summary
-  Future<void> sendMessage(String receiverId, String text) async {
-    final user = _auth.currentUser;
-    if (user == null) return;
+  // Send message
+  Future<void> sendMessage(String chatId, String text) async {
+    if (currentUserId == null || text.trim().isEmpty) return;
 
-    final senderId = user.uid;
-    // Optimistic UI updates or fetch actual name
-    final senderData = await getUserData(senderId);
-    final senderName = senderData?['username'] ?? 'User';
+    try {
+      final timestamp = Timestamp.now();
 
-    final timestamp = Timestamp.now();
-    final chatRoomId = getChatRoomId(senderId, receiverId);
+      // Create message
+      final message = MessageModel(
+        id: '',
+        senderId: currentUserId!,
+        text: text.trim(),
+        timestamp: timestamp,
+        deletedBy: [],
+      );
 
-    // Create a new message document
-    final messageRef = _firestore
-        .collection('chat_rooms')
-        .doc(chatRoomId)
-        .collection('messages')
-        .doc();
+      // Add message to subcollection
+      await _firestore
+          .collection('chats')
+          .doc(chatId)
+          .collection('messages')
+          .add(message.toMap());
 
-    final batch = _firestore.batch();
-
-    // 1. Add the message
-    batch.set(messageRef, {
-      'id': messageRef.id,
-      'senderId': senderId,
-      'senderName': senderName,
-      'text': text,
-      'timestamp': timestamp,
-      'read': false, // Future enhancement: Read receipts
-    });
-
-    // 2. Update the chat room summary (for the list view)
-    batch.set(
-      _firestore.collection('chat_rooms').doc(chatRoomId),
-      {
-        'participants': [senderId, receiverId],
-        'lastMessage': text,
+      // Update chat's last message
+      await _firestore.collection('chats').doc(chatId).update({
+        'lastMessage': text.trim(),
         'lastMessageTime': timestamp,
-        'chatRoomId': chatRoomId,
-      },
-      SetOptions(merge: true),
-    );
-
-    await batch.commit();
+        'deletedBy': [], // Restore chat for all users when new message arrives
+      });
+    } catch (e) {
+      rethrow;
+    }
   }
 
-  /// Stream of Chat Rooms for the main list
-  Stream<QuerySnapshot> getUserChatRooms() {
-    final user = _auth.currentUser;
-    if (user == null) return const Stream.empty();
+  // Get chats stream (only non-deleted chats)
+  Stream<List<ChatModel>> getChatsStream() {
+    if (currentUserId == null) return Stream.value([]);
 
     return _firestore
-        .collection('chat_rooms')
-        .where('participants', arrayContains: user.uid)
-        .orderBy('lastMessageTime', descending: true)
-        .snapshots();
+        .collection('chats')
+        .where('participants', arrayContains: currentUserId)
+        .snapshots()
+        .map((snapshot) {
+      final chats = snapshot.docs
+          .map((doc) => ChatModel.fromFirestore(doc))
+          .where((chat) => !chat.isDeletedBy(currentUserId!))
+          .toList();
+
+      // Sort chats locally by last message time
+      chats.sort(
+        (a, b) => b.lastMessageTime.compareTo(a.lastMessageTime),
+      );
+
+      return chats;
+    });
   }
 
-  /// Stream of Messages for a specific chat
-  Stream<QuerySnapshot> getMessages(String otherUserId) {
-    final user = _auth.currentUser;
-    if (user == null) return const Stream.empty();
-
-    final roomId = getChatRoomId(user.uid, otherUserId);
+  // Get messages stream (only non-deleted messages)
+  Stream<List<MessageModel>> getMessagesStream(String chatId) {
+    if (currentUserId == null) return Stream.value([]);
 
     return _firestore
-        .collection('chat_rooms')
-        .doc(roomId)
+        .collection('chats')
+        .doc(chatId)
         .collection('messages')
         .orderBy('timestamp', descending: true)
-        .limit(100) // Increased limit for better UX
-        .snapshots();
+        .limit(100)
+        .snapshots()
+        .map((snapshot) {
+      return snapshot.docs
+          .map((doc) => MessageModel.fromFirestore(doc))
+          .where((message) => !message.isDeletedBy(currentUserId!))
+          .toList();
+    });
+  }
+
+  // Delete chat (soft delete - only for current user)
+  Future<void> deleteChat(String chatId) async {
+    if (currentUserId == null) return;
+
+    try {
+      await _firestore.collection('chats').doc(chatId).update({
+        'deletedBy': FieldValue.arrayUnion([currentUserId]),
+      });
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Clear chat messages (soft delete - only for current user)
+  Future<void> clearChat(String chatId) async {
+    if (currentUserId == null) return;
+
+    try {
+      final messagesSnapshot = await _firestore
+          .collection('chats')
+          .doc(chatId)
+          .collection('messages')
+          .get();
+
+      final batch = _firestore.batch();
+
+      // Mark messages as deleted for current user
+      for (var doc in messagesSnapshot.docs) {
+        batch.update(doc.reference, {
+          'deletedBy': FieldValue.arrayUnion([currentUserId]),
+        });
+      }
+
+      await batch.commit();
+
+      // Clear last message preview for current user
+      await _firestore.collection('chats').doc(chatId).update({
+        'lastMessage': '',
+        'lastMessageTime': null,
+      });
+    } catch (e) {
+      rethrow;
+    }
   }
 }
